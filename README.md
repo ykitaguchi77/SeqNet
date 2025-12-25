@@ -21,10 +21,12 @@ Fig.1 The network architecture of SeqNet.
 
 This fork has been migrated to TensorFlow 2.x with the following changes:
 
-- **Full TF2 compatibility**: Works with TensorFlow 2.16+ and Keras 3
+- **Inference only**: This TF2 port supports inference only. `train.py` is NOT compatible with TF2.
 - **Metal GPU support**: Native GPU acceleration on Apple Silicon (M1/M2/M3) via `tensorflow-metal`
 - **Preserved weights compatibility**: Original pretrained weights work without modification
-- **Single image inference**: Added `inference_single.py` for processing individual images
+- **Use `predict_tf2.py`**: TF2 version of prediction script (replaces `predict.py`)
+
+> **Note**: For training, please use the original TensorFlow 1.x implementation from [the upstream repository](https://github.com/conscienceli/SeqNet).
 
 ### Requirements
 
@@ -40,23 +42,9 @@ pip install tensorflow numpy scikit-image opencv-python tqdm Pillow h5py
 
 ## Usage
 
-When training, datasets should be placed at `./data/ALL`, following the data structure defined in `./utils/prepare_dataset.py`.
+> **Important**: This TF2 fork is for **inference only**. Training requires TensorFlow 1.x.
 
-Training:
-
-```bash
-python train.py
-```
-
-Models will be saved in `./trained_model/` and results will be saved at `./output/`.
-
-Prediction (batch):
-
-```bash
-python predict.py -i ./data/test_images/ -o ./output/
-```
-
-Prediction (TF2):
+Prediction:
 
 ```bash
 python predict_tf2.py -i ./data/test_images/ -o ./output/
@@ -65,7 +53,8 @@ python predict_tf2.py -i ./data/test_images/ -o ./output/
 Options:
 - `-i, --input`: Input directory path (required)
 - `-o, --output`: Output directory (default: ./output/)
-- `-p, --preprocess`: Apply CLAHE preprocessing for low-contrast images
+
+Results will be saved in the output directory.
 
 ## Pretrained Weights
 
