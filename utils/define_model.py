@@ -1,25 +1,31 @@
+"""
+TF2-compatible model definition that matches the exact TF1 structure.
+This is a direct port of the original TF1 define_model.py without using helper functions.
+"""
 import h5py
-import keras.backend as K
 import numpy as np
 import os
 import os.path
 import tensorflow as tf
 import threading
 from PIL import Image
-from keras import backend as K
-from keras import losses
-from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from keras.layers import Input, MaxPooling2D, Lambda
-from keras.layers import concatenate, Conv2D, Conv2DTranspose, Dropout, ReLU, BatchNormalization, Activation
-from keras.layers.merge import add, multiply
-from keras.models import Model
-from keras.optimizers import Adam
+from tensorflow.keras import backend as K
+from tensorflow.keras import losses
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.layers import Input, MaxPooling2D, Lambda
+from tensorflow.keras.layers import concatenate, Conv2D, Conv2DTranspose, Dropout, ReLU, BatchNormalization, Activation
+from tensorflow.keras.layers import Add, Multiply
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
 from numpy import random
 from random import randint
-from utils import data_augmentation, prepare_dataset
 
 
 def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
+    """
+    Build the SeqNet model with exact TF1 structure.
+    Note: do=0 is the original default (Dropout disabled).
+    """
     inputs = Input((None, None, 3))
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(inputs)))
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv1)))
@@ -61,6 +67,7 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(up9)))
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv9)))
 
+    # Shared layers for segmentation iteration
     pt_conv1a = Conv2D(minimum_kernel, (3, 3), padding='same')
     pt_activation1a = activation()
     pt_dropout1a = Dropout(do)
@@ -139,10 +146,9 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
         x, inputs = args
         return x * inputs
     cls_in = Lambda(masked_input)([seg_final_out, inputs])
-    # cls_in = concatenate([cls_in, crossing_final_out], axis=3)
     cls_in = Lambda(lambda x: K.stop_gradient(x))(cls_in)
 
-    # to cls (artery)
+    # ============ ARTERY BRANCH ============
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(cls_in)))
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv1)))
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -181,7 +187,7 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(up9)))
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv9)))
 
-
+    # Shared layers for artery iteration
     pt_cls_art_conv1a = Conv2D(minimum_kernel, (3, 3), padding='same')
     pt_cls_art_activation1a = activation()
     pt_cls_art_dropout1a = Dropout(do)
@@ -251,13 +257,10 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
 
         conv9s_cls_art.append(conv9)
 
-
     cls_art_final_out = Conv2D(1, (1, 1), activation='sigmoid', name='cls_art_final_out')(conv9)
-
     outs.append(cls_art_final_out)
 
-
-    # to cls (vein)
+    # ============ VEIN BRANCH ============
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(cls_in)))
     conv1 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv1)))
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -296,7 +299,7 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(up9)))
     conv9 = Dropout(do)(activation()(Conv2D(minimum_kernel, (3, 3), padding='same')(conv9)))
 
-
+    # Shared layers for vein iteration
     pt_cls_vei_conv1a = Conv2D(minimum_kernel, (3, 3), padding='same')
     pt_cls_vei_activation1a = activation()
     pt_cls_vei_dropout1a = Dropout(do)
@@ -366,14 +369,10 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
 
         conv9s_cls_vei.append(conv9)
 
-
     cls_vei_final_out = Conv2D(1, (1, 1), activation='sigmoid', name='cls_vei_final_out')(conv9)
-
     outs.append(cls_vei_final_out)
 
-
     model = Model(inputs=[inputs], outputs=outs)
-
 
     loss_funcs = {}
     for iteration_id in range(iteration):
@@ -385,110 +384,13 @@ def get_unet(minimum_kernel=32, do=0, activation=ReLU, iteration=1):
         loss_funcs.update({f'out1_cls_art{iteration_id + 1}': losses.binary_crossentropy})
     for iteration_id in range(iteration):
         loss_funcs.update({f'out1_cls_vei{iteration_id + 1}': losses.binary_crossentropy})
-  
+
     metrics = {
         "seg_final_out": ['accuracy'],
         "cls_art_final_out": ['accuracy'],
         "cls_vei_final_out": ['accuracy'],
     }
 
-    model.compile(optimizer=Adam(lr=1e-3), loss=loss_funcs, metrics=metrics)
+    model.compile(optimizer=Adam(learning_rate=1e-3), loss=loss_funcs, metrics=metrics)
 
     return model
-
-
-def random_crop(img, mask, mask_onehot, crop_size):
-    imgheight = img.shape[0]
-    imgwidth = img.shape[1]
-
-    i = randint(0, imgheight - crop_size)
-    j = randint(0, imgwidth - crop_size)
-
-    return img[i:(i + crop_size), j:(j + crop_size), :]\
-            , np.array(mask)[:, i:(i + crop_size), j:(j + crop_size)]\
-            , np.array(mask_onehot)[:, i:(i + crop_size), j:(j + crop_size)]
-
-
-class Generator():
-    def __init__(self, batch_size, repeat, dataset):
-        self.lock = threading.Lock()
-        self.dataset = dataset
-        with self.lock:
-            self.list_images_all = prepare_dataset.getTrainingData(0, self.dataset)
-            self.list_gt_all = prepare_dataset.getTrainingData(1, self.dataset)
-            self.list_gt_all_onehot = prepare_dataset.getTrainingData(1, self.dataset, need_one_hot=True)
-        self.n = len(self.list_images_all)
-        self.index = 0
-        self.repeat = repeat
-        self.batch_size = batch_size
-        self.step = self.batch_size // self.repeat
-
-        if self.repeat >= self.batch_size:
-            self.repeat = self.batch_size
-            self.step = 1
-
-    def gen(self, au=True, crop_size=48, iteration=None):
-
-        while True:
-            data_yield = [self.index % self.n,
-                          (self.index + self.step) % self.n if (self.index + self.step) < self.n else self.n]
-            self.index = (self.index + self.step) % self.n
-
-            list_images_base = self.list_images_all[data_yield[0]:data_yield[1]]
-            list_gt_base = self.list_gt_all[data_yield[0]:data_yield[1]]
-            list_gt_onehot_base = self.list_gt_all_onehot[data_yield[0]:data_yield[1]]
-
-            list_images_aug = []
-            list_gt_aug = []
-            list_gt_onehot_aug = []
-            image_id = -1
-            for image, gt in zip(list_images_base, list_gt_base):
-                image_id += 1
-                gt2 = list_gt_onehot_base[image_id]
-                if au:
-                    if crop_size == prepare_dataset.DESIRED_DATA_SHAPE[0]:
-                        for _ in range(self.repeat):
-                            image, gt, gt2 = data_augmentation.random_augmentation(image, gt, gt2)
-                            list_images_aug.append(image)
-                            list_gt_aug.append(gt)
-                            list_gt_onehot_aug.append(gt2)
-                    else:
-                        image, gt, gt2 = data_augmentation.random_augmentation(image, gt, gt2)
-                        list_images_aug.append(image)
-                        list_gt_aug.append(gt)
-                        list_gt_onehot_aug.append(gt2)
-                else:
-                    list_images_aug.append(image)
-                    list_gt_aug.append(gt)
-                    list_gt_onehot_aug.append(gt2)
-
-            list_images = []
-            list_gt = []
-            list_gt_onehot = []
-            image_id = -1
-            if crop_size == prepare_dataset.DESIRED_DATA_SHAPE[0]:
-                list_images = list_images_aug
-                list_gt = list_gt_aug
-                list_gt_onehot = list_gt_onehot_aug
-            else:
-                for image, gt in zip(list_images_aug, list_gt_aug):
-                    image_id += 1
-                    for _ in range(self.repeat):
-                        image_, gt_, gt_onehot_ = random_crop(image, gt, list_gt_onehot_aug[image_id], crop_size)
-
-                        list_images.append(image_)
-                        list_gt.append(gt_)
-                        list_gt_onehot.append(gt_onehot_)
-
-            outs = {}
-            for iteration_id in range(iteration):
-                outs.update({f'out1{iteration_id + 1}': np.array(list_gt)[:,0]})
-            outs.update({'seg_final_out': np.array(list_gt)[:,0]})
-            # outs.update({'crossing_final_out': np.array(list_gt)[:,1]})
-            outs.update({'cls_art_final_out': np.array(list_gt)[:,2]})
-            outs.update({'cls_vei_final_out': np.array(list_gt)[:,3]})
-            for iteration_id in range(iteration):
-                outs.update({f'out1_cls_art{iteration_id + 1}': np.array(list_gt)[:,2]})
-            for iteration_id in range(iteration):
-                outs.update({f'out1_cls_vei{iteration_id + 1}': np.array(list_gt)[:,3]})
-            yield np.array(list_images), outs

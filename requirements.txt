@@ -1,0 +1,8 @@
+tensorflow-macos
+tensorflow-metal
+numpy
+scikit-image
+opencv-python
+tqdm
+Pillow
+h5py
