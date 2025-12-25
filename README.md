@@ -56,16 +56,16 @@ Prediction (batch):
 python predict.py -i ./data/test_images/ -o ./output/
 ```
 
-Single image inference:
+Prediction (TF2):
 
 ```bash
-python inference_single.py -i input_image.png -o ./output/
+python predict_tf2.py -i ./data/test_images/ -o ./output/
 ```
 
 Options:
-- `-i, --input`: Input image path
-- `-o, --output`: Output directory
-- `--preprocess`: Apply CLAHE preprocessing for low-contrast images
+- `-i, --input`: Input directory path (required)
+- `-o, --output`: Output directory (default: ./output/)
+- `-p, --preprocess`: Apply CLAHE preprocessing for low-contrast images
 
 ## Pretrained Weights
 
